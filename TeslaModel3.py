@@ -16,7 +16,7 @@ chassis_bus = can.interface.Bus(channel='com11', bustype='slcan', bitrate=500000
 
 # Timers for sending messages
 start_time_100ms = time.time()
-start_time_10ms = time.time()
+start_time_20ms = time.time()
 start_time_5s = time.time()
 
 #ID for bruteforcing
@@ -209,6 +209,8 @@ def veh_receive():
 
 veh_receive = threading.Thread(target=veh_receive)    
 veh_receive.start()
+
+    
 #Main loop
 while True:
     current_time = time.time()
@@ -230,13 +232,13 @@ while True:
                 0xb8,0x0f,0,0], is_extended_id=False), 
 
             can.Message(arbitration_id=0x321, data=[ # Vehicle Controller Front Sensors - Outside temp, brake fluid, coolant level, washer fluid level
-                0xff,0xff,0b00000010,int((outsideTemp+40)*1.11),0xff, int((outsideTemp+40)*1.11),0, 0], is_extended_id=False), 
+                0x28,0x82,0xa8,int((outsideTemp+40)*1.11),0x01, int((outsideTemp+40)*1.11),0x30,0xa6], is_extended_id=False), 
 
             can.Message(arbitration_id=0x221, data=[ # Vehicle Controller Front LV Power State
                 ignition*96,0,0,0,0,0,0,0], is_extended_id=False), 
 
             can.Message(arbitration_id=0x212, data=[ # BMS Status - Makes MCU show charging - 2nd byte: 8 - Ready to charge, 16 - Starting to charge, 24 - chargine complete, 32 - green charging bar, 40 - charging stopped, 48 - no message
-                0,16,0,0,0,0,0,0], is_extended_id=False), 
+                0xb9,16,0x93,0x0c,0x01,0xff,0x3f,0x01], is_extended_id=False), 
 
             #can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
             #    0b001111,0x33,0x00,0x00,0xA4,0x1A,0xA1,0x09], is_extended_id=False), 
@@ -316,29 +318,29 @@ while True:
         start_time_100ms = time.time()
 
 
-    # Execute code every 10ms
-    elapsed_time_10ms = current_time - start_time_10ms
-    if elapsed_time_10ms >= 0.01:  # 10ms
-        messages_10ms_vehicle = [
-            #can.Message(arbitration_id=0x1, data=[ # none
-            #    0,0,0,0,0,0,0,0], is_extended_id=False),    
+    # Execute code every 20ms
+    elapsed_time_20ms = current_time - start_time_20ms
+    if elapsed_time_20ms >= 0.02:  # 20ms
+
+        messages_20ms_vehicle = [
+            can.Message(arbitration_id=0x257, data=[ # Vehicle Speed -- TODO: this should be the one that displays on the MCU
+                random.randint(0,255),random.randint(0,255),0x22,0x04,0x02,0x38,0x11,0x01], is_extended_id=False),    
         ]
-        messages_10ms_chassis = [
+        messages_20ms_chassis = [
             #can.Message(arbitration_id=0x1, data=[ # none
             #    0,0,0,0,0,0,0,0], is_extended_id=False),    
         ]
 
-
-        for message in messages_10ms_vehicle:
+        for message in messages_20ms_vehicle:
             vehicle_bus.send(message)
-            #print("SEND 10ms: VEH: " + message)
+            #print("SEND 20ms: VEH: " + message)
             wpt.sleep(0.001)
-        for message in messages_10ms_chassis:
+        for message in messages_20ms_chassis:
             chassis_bus.send(message)
-            #print("SEND 10ms: CHA: " + message)
+            #print("SEND 20ms: CHA: " + message)
             wpt.sleep(0.001)
 
-        start_time_10ms = time.time()
+        start_time_20ms = time.time()
 
     # Execute code every 5s
     elapsed_time_5s = current_time - start_time_5s
