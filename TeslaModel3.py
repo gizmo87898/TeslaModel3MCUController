@@ -10,8 +10,8 @@ import win_precise_time as wpt
 from datetime import datetime
 
 #Initalize and connect to CANbuses
-vehicle_bus = can.interface.Bus(channel='com3', bustype='slcan', bitrate=500000)
-chassis_bus = can.interface.Bus(channel='com4', bustype='slcan', bitrate=500000)
+vehicle_bus = can.interface.Bus(channel='com10', bustype='slcan', bitrate=500000)
+chassis_bus = can.interface.Bus(channel='com11', bustype='slcan', bitrate=500000)
 
 
 # Timers for sending messages
@@ -23,7 +23,9 @@ start_time_5s = time.time()
 #unknown ids:
 #0x1f9 - makes the mcu say "tap keycard to drive"
 
-#working an unadded yet:
+#CHECK 0x257, should be speed
+
+#working an unadded yet: (VEHICLE BUS)
 #0x212 - charging stuff
 #0x128 - speed limiter and maybe cruise control
 #0x243 - sets climate control status on mcu
@@ -71,10 +73,28 @@ start_time_5s = time.time()
 #0x3f5 - light status: highbeam, parking lights, directionals, foglights, lowbeams
 #0x3f9 - more errors: walk-away unavailable, use keycard, dyno mode, tpms fault, key battery low, update reservation
 #0x46c - charging errors: wall charger not configured, temp too high, 
-#0x4
+#CHASSIS BUS:
+#0x145 - ABS light
+#0x329 - Autopilot faults, AEB in progress, AEB unavailable
+#0x350 - Autopark
+#0x35d power brake reduced
+#0x369,36a, 36c - take control immidately, vehicle departing lane
+#0x36f - tpms stuff - new wheels detected, low tire pressure, tpms fault
+#0x370 - Steering assist fault
+#0x371 - safety restarint system faults
+#0x389 - blinking yellow steering wheel icon nexto to gear indicator
+#0x3d5 - ABS disabled message, brake fluid low message
+#0x3f1 - srs faults, airbag light DO NOT SEND THIS IT MAKES THE WHOLE MCU FREEZE FOR A FEW SECS
+#0x3f4 - Camera calibration
+#0x439 - autosteer/cruisecontrol faults
+#0x43a - Autopark, and auto lane change unavailable
+#0x449 - autopilot errors: lane departure avoidance, autopilot unavailable, gps antenna error
+#0x459 autopilot errors: gps antenna disconnected, update required, autopilot unavailable, autopilot computer needs rebooting
+#0x479 - cameras dirty autocleaning, FSD unavailable at current location, autosilot camera requires service, cabin camera unavailable, 
 
-id_counter = 0x0
-test_counter = 30
+id_counter = 0x31c
+test_timer = 5
+test_counter = 0
 
 #Counters for messages
 counter_8bit_100ms = 0
@@ -84,12 +104,18 @@ counter_4bit_100ms = 0
 #Inital values from Outgauge
 ignition = True # Ignition switch
 speed = 0 # Vehicle speed in MPH
-gear = "P" # Current gear
-coolant_temp = 90 # C
-oil_temp = 90 # C
-battery = 100 # 0 to 100
-lv_battery = 12 # V
-drive_mode = 2 # sport/comfort/etc
+gear = 1 # Current gear: 1 = P, 2 = R, 3 = N, 4 = D
+
+outsideTemp = 72
+#0 = -40F
+#0x21/33 = -10F
+#0x2c/44 = 0F
+#0x50/80 = 32F
+#0x7c/124 = 72F
+#0x9b/155 = 100F
+#0xb2/178 = 120F
+#0xff/255 = 190F
+
 front_left_psi = 30 # PSI
 front_right_psi = 30 # PSI
 rear_left_psi = 30 # PSI
@@ -198,16 +224,25 @@ while True:
         date = datetime.now()
         messages_100ms_vehicle = [
             can.Message(arbitration_id=0x118, data=[ # Drive system status (gear)
-                0xFA,0x61,128,0x00,0x00,0x88,0x70,0xFB], is_extended_id=False), #3rd byte is gear, 32 = park, 64 = reverse, 96 = neutral, 128 = drive, 160 = SNA, 
+                0xFA,0x61,gear*32,0x00,0x00,0x88,0x70,0xFB], is_extended_id=False), #3rd byte is gear
             
             can.Message(arbitration_id=0x3b6, data=[ # Set Odometer, 0 = 0mi, 0x25,0x03 = 1mi, 0x6f,0x09 = 2mi, 0xb8,0x0f = 3mi
                 0xb8,0x0f,0,0], is_extended_id=False), 
 
-            can.Message(arbitration_id=0x221, data=[ # byte 1, 64 - parkbrake fault, 96 - all warning lights
-                0b01100000,0,0,0,0,0,0,0], is_extended_id=False), 
+            can.Message(arbitration_id=0x321, data=[ # Vehicle Controller Front Sensors - Outside temp, brake fluid, coolant level, washer fluid level
+                0xff,0xff,0b00000010,int((outsideTemp+40)*1.11),0xff, int((outsideTemp+40)*1.11),0, 0], is_extended_id=False), 
+
+            can.Message(arbitration_id=0x221, data=[ # Vehicle Controller Front LV Power State
+                ignition*96,0,0,0,0,0,0,0], is_extended_id=False), 
+
+            can.Message(arbitration_id=0x212, data=[ # BMS Status - Makes MCU show charging - 2nd byte: 8 - Ready to charge, 16 - Starting to charge, 24 - chargine complete, 32 - green charging bar, 40 - charging stopped, 48 - no message
+                0,16,0,0,0,0,0,0], is_extended_id=False), 
+
+            #can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
+            #    0b001111,0x33,0x00,0x00,0xA4,0x1A,0xA1,0x09], is_extended_id=False), 
+
             
-            can.Message(arbitration_id=0x352, data=[
-                # bytes 0..7, little-endian, built from one 64-bit payload expression
+            can.Message(arbitration_id=0x352, data=[ # HV Battery Status
                 (((
                     (int(round(nominalFullPackEnergy * 10))      & ((1 << 11) - 1)) << 0  |  # 0|11
                     (int(round(nominalEnergyRemaining * 10))     & ((1 << 11) - 1)) << 11 |  # 11|11
@@ -239,8 +274,11 @@ while True:
             can.Message(arbitration_id=id_counter, data=[
                 random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False)
         ]
-        messages_100ms_chassis = [
 
+        messages_100ms_chassis = [
+            can.Message(
+                arbitration_id=0x145,data=[0,0,0,0,0,0,0,0],is_extended_id=False # This needs a bunch of variables added, but it at least gets the ABS light off for now.
+            ),
             can.Message(
                 arbitration_id=0x175,
                 data=[
@@ -255,8 +293,8 @@ while True:
                 ],
                 is_extended_id=False
             ),
-            #can.Message(arbitration_id=id_counter, data=[
-            #    random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False),
+            can.Message(arbitration_id=id_counter, data=[
+                random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False),
         ]
         
 
@@ -271,7 +309,7 @@ while True:
             #print("SEND 100ms: VEH: " + message)
             wpt.sleep(0.001)
         for message in messages_100ms_chassis:
-            vehicle_bus.send(message)
+            chassis_bus.send(message)
             #print("SEND 100ms: CHA: " + message)
             wpt.sleep(0.001)
 
@@ -282,12 +320,12 @@ while True:
     elapsed_time_10ms = current_time - start_time_10ms
     if elapsed_time_10ms >= 0.01:  # 10ms
         messages_10ms_vehicle = [
-            can.Message(arbitration_id=0x1, data=[ # none
-                0,0,0,0,0,0,0,0], is_extended_id=False),    
+            #can.Message(arbitration_id=0x1, data=[ # none
+            #    0,0,0,0,0,0,0,0], is_extended_id=False),    
         ]
         messages_10ms_chassis = [
-            can.Message(arbitration_id=0x1, data=[ # none
-                0,0,0,0,0,0,0,0], is_extended_id=False),    
+            #can.Message(arbitration_id=0x1, data=[ # none
+            #    0,0,0,0,0,0,0,0], is_extended_id=False),    
         ]
 
 
@@ -304,7 +342,7 @@ while True:
 
     # Execute code every 5s
     elapsed_time_5s = current_time - start_time_5s
-    if elapsed_time_5s >= 2:
+    if elapsed_time_5s >= test_timer:
         id_counter += 1
         test_counter += 1
         print(test_counter)
