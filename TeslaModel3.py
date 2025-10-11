@@ -24,11 +24,12 @@ unknown_chassis_msgs = deque(maxlen=50)  # holds can.Message objects
 #0x1f9 - makes the mcu say "tap keycard to drive"
 
 #CHECK 0x257, should be speed
+#CHECK 29D/2B4/31c/214/264/2a8 during CHARGINg, should show charging status voltage/amps
 
 #working an unadded yet: (VEHICLE BUS)
 #0x128 - Speedlimiter and cruise control
 #0x212 - charging stuff
-#0x228 - parking brake right (EPB Right Status)
+#0x228 - parking brake right (EPB Right Status) This is sent from the MCU, so unsure how this works
 #0x243 - sets climate control status on mcu (Vehicle Controller Right HVAC Status)
 #0x249 - sets wiper status (SCCM Left Stalk)
 #0x25e - brings up charging menu
@@ -120,6 +121,10 @@ counter_4bit_100ms = 0
 ignition = True # Ignition switch
 speed = 0 # Vehicle speed in MPH
 gear = 1 # Current gear: 1 = P, 2 = R, 3 = N, 4 = D
+vehicle_speed_kph = 20
+ui_speed_raw = 20
+ui_speed_high_raw = 50
+ui_units = 1
 
 outsideTemp = 72
 #0 = -40F
@@ -181,7 +186,19 @@ parking_brake = False
 highbeam = False
 foglight = False
 lowbeam = False 
+drl = False
+brake_light = False
+reverse = False
 parking_lights = False
+
+vdc_flash = False
+vdc_on = False
+tc_flash = False
+tc_on = False
+tc_mode = 0 # 0 "NORMAL" 1 "SLIP_START" 2 "DEV_MODE_1" 3 "DEV_MODE_2" 4 "ROLLS_MODE" 5 "DYNO_MODE" 6 "OFFROAD_ASSIST"
+ptc_ok = True
+btc_state = True
+vehicle_hold = False
 
 hood = False
 trunk = False
@@ -928,6 +945,38 @@ veh_receive = threading.Thread(target=veh_receive)
 veh_receive.start()
 
 
+def calculate_ui_speed_checksum(msg: can.Message) -> can.Message:
+    """
+    Fix Tesla DI_speed (0x257) frame:
+      - Increment 4-bit counter in byte 2 (lower nibble) modulo 16
+      - Recompute checksum in byte 1 using: (sum(bytes[1:8]) + 0x59) & 0xFF
+    Returns a NEW python-can Message, preserving other fields/flags.
+    """
+    if msg is None or msg.dlc != 8:
+        raise ValueError("DI_speed (0x257) must be an 8-byte message")
+
+    data = bytearray(msg.data)
+
+    # Increment 4-bit counter (lower nibble of byte 2)
+    current_counter = data[1] & 0x0F
+    next_counter = (current_counter + 1) & 0x0F
+    data[1] = (data[1] & 0xF0) | next_counter
+
+    # Recompute checksum over bytes 1..7 with seed 0x59
+    checksum = (sum(data[1:]) + 0x59) & 0xFF
+    data[0] = checksum
+
+    # Return new message with corrected data; preserve original flags/ID
+    return can.Message(
+        arbitration_id=msg.arbitration_id,
+        data=bytes(data),
+        is_extended_id=msg.is_extended_id,
+        is_fd=getattr(msg, "is_fd", False),
+        bitrate_switch=getattr(msg, "bitrate_switch", False),
+        error_state_indicator=getattr(msg, "error_state_indicator", False),
+    )
+
+
 #Main loop
 while True:
     current_time = time.time()
@@ -962,6 +1011,15 @@ while True:
 
             can.Message(arbitration_id=0x212, data=[ # BMS Status - Makes MCU show charging - 2nd byte: 8 - Ready to charge, 16 - Starting to charge, 24 - chargine complete, 32 - green charging bar, 40 - charging stopped, 48 - no message
                 0xb9,4,0x93,0x0c,0x01,0xff,0x3f,0x01], is_extended_id=False), 
+            
+            can.Message(arbitration_id=0x3f5, data=[ # VC Front Lighting
+                0x00,0xf5,0xf5,(lowbeam*16)+(lowbeam+64),(highbeam)+(highbeam*4)+(drl*16)+(drl*32),foglight+(foglight*4),(left_directional*4)+(right_directional*16)+(parking_lights*64),parking_lights], is_extended_id=False), 
+            
+            can.Message(arbitration_id=0x3e3, data=[ # VC Right Lighting
+                brake_light+(reverse*32),0xf5], is_extended_id=False), 
+
+            can.Message(arbitration_id=0x2b6, data=[ # DI Chassis Control Status
+                vdc_flash+(vdc_on*2)+(tc_flash*4)+(tc_on*8)+(tc_mode*16)+(ptc_ok*128),(btc_state*2)+(vehicle_hold*4)], is_extended_id=False), #128 sets ptc to on
 
             #can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
             #    0b001111,0x33,0x00,0x00,0xA4,0x1A,0xA1,0x09], is_extended_id=False), 
@@ -1042,14 +1100,37 @@ while True:
     if elapsed_time_20ms >= 0.02:  # 20ms
 
         messages_20ms_vehicle = [
-            can.Message(arbitration_id=0x257, data=[ # Vehicle Speed -- TODO: this should be the one that displays on the MCU
-                random.randint(0,255),random.randint(0,255),0x22,0x04,0x02,0x38,0x11,0x01], is_extended_id=False),    
+            can.Message(
+                arbitration_id=0x257,
+                data=[
+                    0x00,
+
+                    ((((int(round((vehicle_speed_kph + 40.0) / 0.08)) & 0xFFF) >> 8) & 0x0F) << 4) | 0x00,
+
+                    (int(round((vehicle_speed_kph + 40.0) / 0.08)) & 0xFF),
+
+                    ((ui_speed_raw & 0x1FF) >> 1) & 0xFF,
+
+                    (((ui_speed_raw & 0x1) << 7) | ((ui_units & 0x1) << 6) | ((ui_speed_high_raw >> 3) & 0x3F)) & 0xFF,
+
+                    ((ui_speed_high_raw & 0x7) << 5) & 0xFF,
+
+                    # byte6: UNKNOWN - correlated to speed in some way
+                    0x1f,
+
+                    # byte7: commonly 0x01 in your logs
+                    0x01,
+                ],
+                is_extended_id=False
+            ),
         ]
+
+
         messages_20ms_chassis = [
             #can.Message(arbitration_id=0x1, data=[ # none
             #    0,0,0,0,0,0,0,0], is_extended_id=False),    
         ]
-
+        messages_20ms_vehicle[0] = calculate_ui_speed_checksum(messages_20ms_vehicle[0])
         for message in messages_20ms_vehicle:
             vehicle_bus.send(message)
             #print("SEND 20ms: VEH: " + message)
