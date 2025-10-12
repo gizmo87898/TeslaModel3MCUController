@@ -7,73 +7,61 @@ import win_precise_time as wpt
 from datetime import datetime
 from collections import deque
 
-#Initalize and connect to CANbuses
-vehicle_bus = can.interface.Bus(channel='COM10', bustype='slcan', bitrate=500000, write_timeout=1.0)
-chassis_bus = can.interface.Bus(channel='COM11', bustype='slcan', bitrate=500000, write_timeout=1.0)
-
-# Timers for sending messages
-start_time_100ms = time.time()
-start_time_20ms = time.time()
-start_time_5s = time.time()
-
-unknown_vehicle_msgs = deque(maxlen=50)  # holds can.Message objects
-unknown_chassis_msgs = deque(maxlen=50)  # holds can.Message objects
 
 #ID for bruteforcing
 #unknown ids:
 #0x1f9 - makes the mcu say "tap keycard to drive"
 
-#CHECK 0x257, should be speed
-#CHECK 29D/2B4/31c/214/264/2a8 during CHARGINg, should show charging status voltage/amps
+#CHECK 29D/2B4/31c/214/264/2a8/132 during CHARGINg, should show charging status voltage/amps
 
 #working an unadded yet: (VEHICLE BUS)
-#0x128 - Speedlimiter and cruise control
-#0x212 - charging stuff
-#0x228 - parking brake right (EPB Right Status) This is sent from the MCU, so unsure how this works
-#0x243 - sets climate control status on mcu (Vehicle Controller Right HVAC Status)
-#0x249 - sets wiper status (SCCM Left Stalk)
+#0x128 - Speedlimiter and cruise control (100ms)
+#0x212 - charging stuff (100ms)
+#0x228 - parking brake right (EPB Right Status) This is sent from the MCU, so unsure how this works (100ms)
+#0x243 - sets climate control status on mcu (Vehicle Controller Right HVAC Status) (30ms)
+#0x249 - sets wiper status (SCCM Left Stalk) (50ms)
 #0x25e - brings up charging menu
-#0x2b6 - parking brake hold (DI Chassis Control Status)
+#0x2b6 - parking brake hold (DI Chassis Control Status) (100ms)
 #0x2b7? - speed, showed 27mph at some point
-#0x2e1 - frunk status, also makes the mcu restart (not fully) after a few seconds of it being sent (Vehicle Controller Front Status)
-#0x304 - incompatible drive system software detected error message
-#0x31e - charging error messages
-#0x320 - general error messages: pull over now, acceleration is slower,unable to drive, charging not enough
-#0x321 - outside temp (Vehicle Controller Front Sensors)
+#0x2e1 - frunk status, also makes the mcu restart (not fully) after a few seconds of it being sent (Vehicle Controller Front Status) (14ms)
+#0x304 - incompatible drive system software detected error message (1s)
+#0x31e - charging error messages (probably multiplexed, sends m0, wait 100ms, send m1, wait 100ms, send m2, wait 800ms, repeat)
+#0x320 - general error messages: pull over now, acceleration is slower,unable to drive, charging not enough (33ms, multiplexed i think)
+#0x321 - outside temp (Vehicle Controller Front Sensors) (1s)
 #0x338 - more charging errors
-#0x339 - keyless driving enabled message + vehicle locked/unlocked status
-#0x340 - more general error messages: wipers stopping, pull over safely (showing on left on car), update required, lv battery cable loose
-#0x342/3 - if there is a current "stop vehicle" fault, this message makes it show red at the bottom too
-#0x352 - battery percentage and tempurature (snow icon next to percentage) (BMS Energy Status)
-#0x356 - motor errors: motor overheating, power reduced, 
-#0x357 - more motor errors: pull over safely, okay to drive, reduced power
-#0x35a - powertrain errors: okay to drive but needs service, service now, 
-#0x35b - more errors: gearbox fluid service, adaptive air suspension fault
-#0x360 - more errors: manual door released used, dyno mode, secure second row seats, steering wheel buttons unavailable, seats motors used too much
-#0x367 - more errors: hold n for neutral, parking brake not applied, pull over safely with red flashing, power reduced
-#0x368 - more errors: pull over now: unable to drive with red flashing, cruise control disabled
-#0x36b - DYNO MODE, more errors: odometer invalid, tire tread low, tap keycard to drive, autopark aborted
-#0x36e - more errors: auto hold disabled/unavailable, adaptive vehicle ride, wait for system to power up, vehicle auto shifted to N, stability control disabled, high brake temp
+#0x339 - keyless driving enabled message + vehicle locked/unlocked status (100ms)
+#0x340 - more general error messages: wipers stopping, pull over safely (showing on left on car), update required, lv battery cable loose (100ms)
+#0x342/3 - if there is a current "stop vehicle" fault, this message makes it show red at the bottom too (i think this is inaccurate, there is just lag)
+#0x352 - battery percentage and tempurature (snow icon next to percentage) (BMS Energy Status) (1s)
+#0x356 - motor errors: motor overheating, power reduced (1s)
+#0x357 - more motor errors: pull over safely, okay to drive, reduced power (1s)
+#0x35a - powertrain errors: okay to drive but needs service, service now, (1s)
+#0x35b - more errors: gearbox fluid service, adaptive air suspension fault (1s)
+#0x360 - more errors: manual door released used, dyno mode, secure second row seats, steering wheel buttons unavailable, seats motors used too much (100ms, multiplex?)
+#0x367 - more errors: hold n for neutral, parking brake not applied, pull over safely with red flashing, power reduced (1s)
+#0x368 - more errors: pull over now: unable to drive with red flashing, cruise control disabled (1s)
+#0x36b - DYNO MODE, more errors: odometer invalid, tire tread low, tap keycard to drive, autopark aborted (1s)
+#0x36e - more errors: auto hold disabled/unavailable, adaptive vehicle ride, wait for system to power up, vehicle auto shifted to N, stability control disabled, high brake temp (1s)
 #0x37f - charing errors: unabel to charge with chademo adapter, dc fast charging unavailable, charging fault, charger temp high
-#0x384 + 0x385 - incompatible drive system software detected fault
-#0x3a1 - fasten seatbelt messages (Vehicle Controller Front Vehicle Status)
-#0x3a4 - powerwall errors: unable to charge powerwall level too high, power conversion needs service,
-#0x3a5 - motor errors: motor overheating, power reduced
-#0x3aa - more errors: vehicle shutting down, unable to charge, vehicle config mismatch
-#0x3b5 - more errors: power limited, okay to drive, power reduced
-#0x3b6 - SETS ODOMETER
+#0x384 + 0x385 - incompatible drive system software detected fault (both 1s)
+#0x3a1 - fasten seatbelt messages (Vehicle Controller Front Vehicle Status) (50ms)
+#0x3a4 - powerwall errors: unable to charge powerwall level too high, power conversion needs service, (1s)
+#0x3a5 - motor errors: motor overheating, power reduced (1s)
+#0x3aa - more errors: vehicle shutting down, unable to charge, vehicle config mismatch (1s)
+#0x3b5 - more errors: power limited, okay to drive, power reduced (1s)
+#0x3b6 - SETS ODOMETER (1s)
 #0x3be - charger errors: unable to dc fast charge, charger fault, charger temp too high
-#0x3c0 - manual ac off, cabin heating disabled, secure second row, manual door release used
-#0x3c2 - steering wheel controls - shows mic icon, adjusts autopilot car in front distance, driver profile adjusted, volume (Vehicle Controller Left Switch Status)
-#0x3c5 - powertrain errors: okay to drive, requires service
-#0x3c8 - transport mode: parkbrake not set, ebrake applied, braking degraded
-#0x3e2 - trailer light: makes it go red/yellow (Vehicle Controller Left Light Status)
-#0x3e3 - brake light/rear fog light status: makes the car show brake lights and foglight icon (Vehicle Controller Right Light Status)
-#0x3e5 - more errors: adaptive air suspension, gearbox fluid service - seems the same as 0x35b
-#0x3e8 - transport mode: parkbrake not set, vehicle will remain in N, dyno mode (not full screen text)
-#0x3e9 - folding mirrors (DAS Body Controls)
-#0x3f5 - light status: highbeam, parking lights, directionals, foglights, lowbeams (Vehicle Controller Front Lighting)
-#0x3f9 - more errors: walk-away unavailable, use keycard, dyno mode, tpms fault, key battery low, update reservation
+#0x3c0 - manual ac off, cabin heating disabled, secure second row, manual door release used (100ms)
+#0x3c2 - steering wheel controls - shows mic icon, adjusts autopilot car in front distance, driver profile adjusted, volume (Vehicle Controller Left Switch Status) (50ms, multiplexed)
+#0x3c5 - powertrain errors: okay to drive, requires service (1s)
+#0x3c8 - transport mode: parkbrake not set, ebrake applied, braking degraded (100ms)
+#0x3e2 - trailer light: makes it go red/yellow (Vehicle Controller Left Light Status) (100ms)
+#0x3e3 - brake light/rear fog light status: makes the car show brake lights and foglight icon (Vehicle Controller Right Light Status) (100ms)
+#0x3e5 - more errors: adaptive air suspension, gearbox fluid service - seems the same as 0x35b (1s)
+#0x3e8 - transport mode: parkbrake not set, vehicle will remain in N, dyno mode (not full screen text) (100ms, multiplex?)
+#0x3e9 - folding mirrors (DAS Body Controls) (500ms, counter and checksum)
+#0x3f5 - light status: highbeam, parking lights, directionals, foglights, lowbeams (Vehicle Controller Front Lighting) (100ms)
+#0x3f9 - more errors: walk-away unavailable, use keycard, dyno mode, tpms fault, key battery low, update reservation (100ms)
 #0x46c - charging errors: wall charger not configured, temp too high, 
 #CHASSIS BUS:
 #0x145 - ABS light (ESP Status)
@@ -85,20 +73,38 @@ unknown_chassis_msgs = deque(maxlen=50)  # holds can.Message objects
 #0x370 - Steering assist fault
 #0x371 - safety restarint system faults
 #0x389 - blinking yellow steering wheel icon nexto to gear indicator (DAS Status 2)
-#0x3d5 - ABS disabled message, brake fluid low message
+#0x3d5 - ABS disabled message, brake fluid low message (1s)
 #0x3f1 - srs faults, airbag light DO NOT SEND THIS IT MAKES THE WHOLE MCU FREEZE FOR A FEW SECS
 #0x3f4 - Camera calibration
-#0x439 - autosteer/cruisecontrol faults
+#0x439 - autosteer/cruisecontrol faults (100ms)
 #0x43a - Autopark, and auto lane change unavailable
 #0x449 - autopilot errors: lane departure avoidance, autopilot unavailable, gps antenna error
 #0x459 autopilot errors: gps antenna disconnected, update required, autopilot unavailable, autopilot computer needs rebooting
 #0x479 - cameras dirty autocleaning, FSD unavailable at current location, autosilot camera requires service, cabin camera unavailable, 
 
+
+#Initalize and connect to CANbuses
+vehicle_bus = can.interface.Bus(channel='COM10', bustype='slcan', bitrate=500000, write_timeout=1.0)
+chassis_bus = can.interface.Bus(channel='COM11', bustype='slcan', bitrate=500000, write_timeout=1.0)
+
+# Timers for sending messages
+start_time_10ms = time.time()
+start_time_20ms = time.time()
+start_time_50ms = time.time()
+start_time_100ms = time.time()
+start_time_1s = time.time()
+start_time_5s = time.time()
+
+#Bruteforcing
 id_counter = 0x0
 test_timer = 1
-
 test_counter = 0
 
+#Counters for messages
+counter_8bit_100ms = 0
+counter_4bit_100ms = 0
+
+#GUI
 ui_status_message = can.Message(arbitration_id=0x353, data=[0,0,0,0,0,0,0,0], is_extended_id=False)
 ui_range_message = can.Message(arbitration_id=0x33A, data=[0,0,0,0,0,0,0,0], is_extended_id=False)
 ui_charge_message = can.Message(arbitration_id=0x333, data=[0,0,0,0,0], is_extended_id=False)
@@ -106,26 +112,17 @@ ui_odo_message = can.Message(arbitration_id=0x3F3, data=[0,0,0], is_extended_id=
 gps_latlong_message = can.Message(arbitration_id=0x04F, data=[0,0,0,0,0,0,0,0], is_extended_id=False)
 utc_time_message = can.Message(arbitration_id=0x318, data=[0,0,0,0,0,0,0,0], is_extended_id=False)
 ui_car_config_message = can.Message(arbitration_id=0x7FF, data=[0,0,0,0,0,0,0,0], is_extended_id=False)
-
+unknown_vehicle_msgs = deque(maxlen=50)  # holds can.Message objects
+unknown_chassis_msgs = deque(maxlen=50)  # holds can.Message objects
 vin_mux_last = None
 vin_segments = {16: None, 17: None, 18: None}  # VINA/VINB/VINC by mux value
 vin_string = ""
 swc_frame_bytes = None  # latest SWC payload to send from main loop (or None)
 
-#Counters for messages
-counter_8bit_100ms = 0
-counter_4bit_100ms = 0
 
-
-#Inital values from Outgauge
+#Vehicle Controller Front
 ignition = True # Ignition switch
-speed = 0 # Vehicle speed in MPH
 gear = 1 # Current gear: 1 = P, 2 = R, 3 = N, 4 = D
-vehicle_speed_kph = 20
-ui_speed_raw = 20
-ui_speed_high_raw = 50
-ui_units = 1
-
 outsideTemp = 72
 #0 = -40F
 #0x21/33 = -10F
@@ -136,28 +133,33 @@ outsideTemp = 72
 #0xb2/178 = 120F
 #0xff/255 = 190F
 
+#TPMS
 front_left_psi = 30 # PSI
 front_right_psi = 30 # PSI
 rear_left_psi = 30 # PSI
 rear_right_psi = 30 # PSI
 
+#Vehicle Speed
+speed = 0 # Vehicle speed in MPH
 wheelspeedFL = 30
 wheelspeedFR = 30
 wheelspeedRR = 30
 wheelspeedRL = 30
 wheelspeedCounter = 0
 wheelspeedChecksum = 0
-
 rawFL = int(wheelspeedFL / 0.04)
 rawFR = int(wheelspeedFR / 0.04)
 rawRL = int(wheelspeedRL / 0.04)
 rawRR = int(wheelspeedRR / 0.04)
+vehicle_speed_kph = 20
+ui_speed_raw = 20
+ui_speed_high_raw = 50
+ui_units = 1
 
-
+#Battery Info
 chargeHoursRemaining = 48  # minutes
 rawBattCurrent = 200.0  # Amps, -340 = full regen, 0-10 = middle, 650 = full power, this is for the bar at the top that shows regen/power
 battVoltage = 400.0  # Volts
-
 #24 = 0%
 #25 = 1%
 #50 = 34%
@@ -165,7 +167,6 @@ battVoltage = 400.0  # Volts
 #85 = 80%
 #99.7 = 100%
 battPercentage = 100 # this shows actual battery percentage at the top
-
 #0x352
 nominalFullPackEnergy = 100 # kWh
 nominalEnergyRemaining = battPercentage # kWh
@@ -175,14 +176,9 @@ energyToChargeComplete = 2 # kWh
 energyBuffer = 3 # kWh
 fullChargeComplete = False
 
-
-
+#VC Front Lighting
 left_directional = False
 right_directional = False
-tc_active = False
-abs_active = False
-parking_brake = False
-
 highbeam = False
 foglight = False
 lowbeam = False 
@@ -191,6 +187,7 @@ brake_light = False
 reverse = False
 parking_lights = False
 
+#DI Chassis Control
 vdc_flash = False
 vdc_on = False
 tc_flash = False
@@ -200,6 +197,7 @@ ptc_ok = True
 btc_state = True
 vehicle_hold = False
 
+#Door Status
 hood = False
 trunk = False
 door_fl = False
@@ -207,8 +205,15 @@ door_fr = False
 door_rl = False
 door_rr = False
 
-airbag = False
-seatbelt = False
+
+airbag_fault = False
+seatbelt_driver = False
+seatbelt_passenger= False
+seatbelt_rear_driver = False
+seatbelt_rear_center = False
+seatbelt_rear_passenger = False
+parking_brake = False
+
 
 def gui_thread():
     # ----- Window -----
@@ -946,12 +951,6 @@ veh_receive.start()
 
 
 def calculate_ui_speed_checksum(msg: can.Message) -> can.Message:
-    """
-    Fix Tesla DI_speed (0x257) frame:
-      - Increment 4-bit counter in byte 2 (lower nibble) modulo 16
-      - Recompute checksum in byte 1 using: (sum(bytes[1:8]) + 0x59) & 0xFF
-    Returns a NEW python-can Message, preserving other fields/flags.
-    """
     if msg is None or msg.dlc != 8:
         raise ValueError("DI_speed (0x257) must be an 8-byte message")
 
@@ -971,9 +970,6 @@ def calculate_ui_speed_checksum(msg: can.Message) -> can.Message:
         arbitration_id=msg.arbitration_id,
         data=bytes(data),
         is_extended_id=msg.is_extended_id,
-        is_fd=getattr(msg, "is_fd", False),
-        bitrate_switch=getattr(msg, "bitrate_switch", False),
-        error_state_indicator=getattr(msg, "error_state_indicator", False),
     )
 
 
@@ -991,69 +987,42 @@ while True:
     if elapsed_time_100ms >= 0.1:
         date = datetime.now()
         messages_100ms_vehicle = [
-            can.Message(arbitration_id=0x118, data=[ # Drive system status (gear)
-                0xFA,0x61,gear*32,0x00,0x00,0x88,0x70,0xFB], is_extended_id=False), #3rd byte is gear
-            
-            can.Message(arbitration_id=0x3b6, data=[ # Set Odometer, 0 = 0mi, 0x25,0x03 = 1mi, 0x6f,0x09 = 2mi, 0xb8,0x0f = 3mi
-                0xb8,0x0f,0,0], is_extended_id=False), 
-
-            can.Message(arbitration_id=0x321, data=[ # Vehicle Controller Front Sensors - Outside temp, brake fluid, coolant level, washer fluid level
-                0x28,0x82,0xa8,int((outsideTemp+40)*1.11),0x01, int((outsideTemp+40)*1.11),0x30,0xa6], is_extended_id=False), 
-
             can.Message(arbitration_id=0x221, data=[ # Vehicle Controller Front LV Power State 64 turns on parkling brake light
                 ignition*96,random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False), 
-
             can.Message(arbitration_id=0x228, data=[ # EPB Right Status
                 0x03,0x16,0x00,0x0C,0x51,0x80,((counter_4bit_100ms & 0xF) << 4) | 0x1,(((counter_4bit_100ms + 4) & 0xF) << 4)], is_extended_id=False), 
-
             can.Message(arbitration_id=0x288, data=[ # EPB Left Status
                 0x03,0x16,0x00,0xCC,0x50,0x80,((counter_4bit_100ms & 0xF) << 4) | 0x1,(((counter_4bit_100ms + 4) & 0xF) << 4)], is_extended_id=False), 
-
             can.Message(arbitration_id=0x212, data=[ # BMS Status - Makes MCU show charging - 2nd byte: 8 - Ready to charge, 16 - Starting to charge, 24 - chargine complete, 32 - green charging bar, 40 - charging stopped, 48 - no message
                 0xb9,4,0x93,0x0c,0x01,0xff,0x3f,0x01], is_extended_id=False), 
-            
             can.Message(arbitration_id=0x3f5, data=[ # VC Front Lighting
                 0x00,0xf5,0xf5,(lowbeam*16)+(lowbeam+64),(highbeam)+(highbeam*4)+(drl*16)+(drl*32),foglight+(foglight*4),(left_directional*4)+(right_directional*16)+(parking_lights*64),parking_lights], is_extended_id=False), 
-            
             can.Message(arbitration_id=0x3e3, data=[ # VC Right Lighting
                 brake_light+(reverse*32),0xf5], is_extended_id=False), 
-
+            can.Message(arbitration_id=0x320, data=[ # General Error messages - byte 1 is supposed to be a 0-2 counter but it still works like this
+                0,0,0,0,0,0,0,0], is_extended_id=False), 
+            can.Message(arbitration_id=0x339, data=[ # Vehicle Locked/unlocked status, maybe security module?
+                0xC1,0x42,0x02,0x00,0x00,0x01,0x44,0x0A], is_extended_id=False), 
+            can.Message(arbitration_id=0x340, data=[ # General Error messages - byte 1 is supposed to be a 0-9 counter but it still works like this, byte 2 is also 1 when counter = 3
+                0,0,0,0,0,0,0,0], is_extended_id=False), 
+            can.Message(arbitration_id=0x128, data=[ # Cruise Control & Speed Limiter
+                0x80,0x00,0xEB,0x0A], is_extended_id=False), 
             can.Message(arbitration_id=0x2b6, data=[ # DI Chassis Control Status
                 vdc_flash+(vdc_on*2)+(tc_flash*4)+(tc_on*8)+(tc_mode*16)+(ptc_ok*128),(btc_state*2)+(vehicle_hold*4)], is_extended_id=False), #128 sets ptc to on
-
             #can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
             #    0b001111,0x33,0x00,0x00,0xA4,0x1A,0xA1,0x09], is_extended_id=False), 
-
-            
-            can.Message(arbitration_id=0x352, data=[ # HV Battery Status
-                (((
-                    (int(round(nominalFullPackEnergy * 10))      & ((1 << 11) - 1)) << 0  |  # 0|11
-                    (int(round(nominalEnergyRemaining * 10))     & ((1 << 11) - 1)) << 11 |  # 11|11
-                    (int(round(expectedEnergyRemaining * 10))    & ((1 << 11) - 1)) << 22 |  # 22|11
-                    (int(round(idealEnergyRemaining * 10))       & ((1 << 11) - 1)) << 33 |  # 33|11
-                    (int(round(energyToChargeComplete * 10))     & ((1 << 11) - 1)) << 44 |  # 44|11
-                    (int(round(energyBuffer * 10))               & ((1 << 8)  - 1)) << 55 |  # 55|8
-                    ((1 if fullChargeComplete else 0)            & 0x1)              << 63    # 63|1
-                ) >> (8 * i)) & 0xFF) for i in range(8)
-            ], is_extended_id=False), 
-
-
             can.Message(arbitration_id=0x132, data = [ #rawbattcurrent: -340 = full regen, 
                 battVoltage_scaled & 0xFF, (battVoltage_scaled >> 8) & 0xFF,  # 0-16: BattVoltage
                 smoothBattCurrent_scaled & 0xFF, (smoothBattCurrent_scaled >> 8) & 0xFF,  # 16-32: SmoothBattCurrent
                 rawBattCurrent_scaled & 0xFF, (rawBattCurrent_scaled >> 8) & 0xFF,  # 32-48: RawBattCurrent
                 chargeHoursRemaining_scaled & 0xFF, (chargeHoursRemaining_scaled >> 8) & 0x0F  # 48-60: ChargeHoursRemaining
             ], is_extended_id=False),
-
             can.Message(arbitration_id=0x102, data=[ # Door status left
                 0x22,0x33,0x00,0x00,0xA4,0x1A,0xA1,0x09], is_extended_id=False), 
-
             can.Message(arbitration_id=0x122, data=[ # Door status left2
                 0x00,0x00,0x12,0x12,0xd2,0x00], is_extended_id=False), 
-
             can.Message(arbitration_id=0x103, data=[ # Door status right
                 0x22,0x33,0x00,0x00,0xAa,0x1c,0x21,0x32], is_extended_id=False), 
-            
             can.Message(arbitration_id=id_counter, data=[
                 random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False)
         ]
@@ -1065,13 +1034,12 @@ while True:
             #can.Message(
             #    arbitration_id=0x370,data=[0,0,0,0,0,0,0,0],is_extended_id=False 
             #),
-            
             #can.Message(arbitration_id=id_counter, data=[
             #    random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False),
         ]
         
         if swc_frame_bytes:
-            messages_100ms_vehicle.append(
+            messages_50ms_vehicle.append(
                 can.Message(arbitration_id=0x3C2, data=list(swc_frame_bytes), is_extended_id=False)
             )
         
@@ -1103,28 +1071,18 @@ while True:
             can.Message(
                 arbitration_id=0x257,
                 data=[
-                    0x00,
-
-                    ((((int(round((vehicle_speed_kph + 40.0) / 0.08)) & 0xFFF) >> 8) & 0x0F) << 4) | 0x00,
-
-                    (int(round((vehicle_speed_kph + 40.0) / 0.08)) & 0xFF),
-
-                    ((ui_speed_raw & 0x1FF) >> 1) & 0xFF,
-
-                    (((ui_speed_raw & 0x1) << 7) | ((ui_units & 0x1) << 6) | ((ui_speed_high_raw >> 3) & 0x3F)) & 0xFF,
-
-                    ((ui_speed_high_raw & 0x7) << 5) & 0xFF,
-
-                    # byte6: UNKNOWN - correlated to speed in some way
-                    0x1f,
-
-                    # byte7: commonly 0x01 in your logs
-                    0x01,
+                    0x00, # Checksum placeholder
+                    ((((int(round((vehicle_speed_kph + 40.0) / 0.08)) & 0xFFF) >> 8) & 0x0F) << 4) | 0x00, #Vehicle speed & Counter
+                    (int(round((vehicle_speed_kph + 40.0) / 0.08)) & 0xFF), # Vehicle speed
+                    ((ui_speed_raw & 0x1FF) >> 1) & 0xFF, # UI Speed
+                    (((ui_speed_raw & 0x1) << 7) | ((ui_units & 0x1) << 6) | ((ui_speed_high_raw >> 3) & 0x3F)) & 0xFF, #UI Speed, UI Units, UI High Speed
+                    ((ui_speed_high_raw & 0x7) << 5) & 0xFF, # Ui High speed
+                    0x1f, # UNKNOWN - correlated to speed in some way
+                    0x01, # Unknown - seems to always be 1
                 ],
                 is_extended_id=False
             ),
         ]
-
 
         messages_20ms_chassis = [
             #can.Message(arbitration_id=0x1, data=[ # none
@@ -1142,6 +1100,95 @@ while True:
 
         start_time_20ms = time.time()
 
+    # Execute code every 1s
+    elapsed_time_1s = current_time - start_time_1s
+    if elapsed_time_1s >= 1:  # 1s
+
+        messages_1s_vehicle = [
+            can.Message(arbitration_id=0x304, data=[ # Drive system software faults
+                0,0,0,0,0,0,0,0], is_extended_id=False), 
+            can.Message(arbitration_id=0x31e, data=[ # Charging Error messages - byte 1 is supposed to be a 0-2 counter but it still works like this
+                0,0,0,0,0,0,0,0], is_extended_id=False), 
+            can.Message(arbitration_id=0x321, data=[ # Vehicle Controller Front Sensors - Outside temp, brake fluid, coolant level, washer fluid level
+                0x28,0x82,0xa8,int((outsideTemp+40)*1.11),0x01, int((outsideTemp+40)*1.11),0x30,0xa6], is_extended_id=False), 
+            can.Message(arbitration_id=0x352, data=[ # HV Battery Status
+                (((
+                    (int(round(nominalFullPackEnergy * 10))      & ((1 << 11) - 1)) << 0  |  # 0|11
+                    (int(round(nominalEnergyRemaining * 10))     & ((1 << 11) - 1)) << 11 |  # 11|11
+                    (int(round(expectedEnergyRemaining * 10))    & ((1 << 11) - 1)) << 22 |  # 22|11
+                    (int(round(idealEnergyRemaining * 10))       & ((1 << 11) - 1)) << 33 |  # 33|11
+                    (int(round(energyToChargeComplete * 10))     & ((1 << 11) - 1)) << 44 |  # 44|11
+                    (int(round(energyBuffer * 10))               & ((1 << 8)  - 1)) << 55 |  # 55|8
+                    ((1 if fullChargeComplete else 0)            & 0x1)              << 63    # 63|1
+                ) >> (8 * i)) & 0xFF) for i in range(8)
+            ], is_extended_id=False), 
+            can.Message(arbitration_id=0x3b6, data=[ # Set Odometer, 0 = 0mi, 0x25,0x03 = 1mi, 0x6f,0x09 = 2mi, 0xb8,0x0f = 3mi
+                0xb8,0x0f,0,0], is_extended_id=False), 
+        ]
+
+
+        messages_1s_chassis = [
+            #can.Message(arbitration_id=0x1, data=[ # none
+            #    0,0,0,0,0,0,0,0], is_extended_id=False),    
+        ]
+        for message in messages_1s_vehicle:
+            vehicle_bus.send(message)
+            #print("SEND 1s: VEH: " + message)
+            wpt.sleep(0.001)
+        for message in messages_1s_chassis:
+            chassis_bus.send(message)
+            #print("SEND 1s: CHA: " + message)
+            wpt.sleep(0.001)
+
+        start_time_1s = time.time()
+
+    # Execute code every 50ms
+    elapsed_time_50ms = current_time - start_time_50ms
+    if elapsed_time_50ms >= 0.05:  # 50ms
+
+        messages_50ms_vehicle = [
+
+        ]
+
+
+        messages_50ms_chassis = [
+            #can.Message(arbitration_id=0x1, data=[ # none
+            #    0,0,0,0,0,0,0,0], is_extended_id=False),    
+        ]
+        for message in messages_50ms_vehicle:
+            vehicle_bus.send(message)
+            #print("SEND 50ms: VEH: " + message)
+            wpt.sleep(0.001)
+        for message in messages_50ms_chassis:
+            chassis_bus.send(message)
+            #print("SEND 50ms: CHA: " + message)
+            wpt.sleep(0.001)
+
+        start_time_50ms = time.time()
+    # Execute code every 10ms
+    elapsed_time_10ms = current_time - start_time_10ms
+    if elapsed_time_50ms >= 0.01:  # 10ms
+
+        messages_10ms_vehicle = [
+            can.Message(arbitration_id=0x118, data=[ # Drive system status (gear)
+                0xFA,0x61,gear*32,0x00,0x00,0x88,0x70,0xFB], is_extended_id=False), #3rd byte is gear
+        ]
+
+
+        messages_10ms_chassis = [
+            #can.Message(arbitration_id=0x1, data=[ # none
+            #    0,0,0,0,0,0,0,0], is_extended_id=False),    
+        ]
+        for message in messages_10ms_vehicle:
+            vehicle_bus.send(message)
+            #print("SEND 10ms: VEH: " + message)
+            wpt.sleep(0.001)
+        for message in messages_10ms_chassis:
+            chassis_bus.send(message)
+            #print("SEND 10ms: CHA: " + message)
+            wpt.sleep(0.001)
+
+        start_time_10ms = time.time()
     # Execute code every 5s
     elapsed_time_5s = current_time - start_time_5s
     if elapsed_time_5s >= test_timer:
