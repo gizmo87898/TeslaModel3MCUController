@@ -84,8 +84,8 @@ from collections import deque
 
 
 #Initalize and connect to CANbuses
-vehicle_bus = can.interface.Bus(channel='COM10', bustype='slcan', bitrate=500000, write_timeout=1.0)
-chassis_bus = can.interface.Bus(channel='COM11', bustype='slcan', bitrate=500000, write_timeout=1.0)
+vehicle_bus = can.interface.Bus(channel='COM4', bustype='slcan', bitrate=500000, write_timeout=1.0)
+chassis_bus = can.interface.Bus(channel='COM5', bustype='slcan', bitrate=500000, write_timeout=1.0)
 
 # Timers for sending messages
 start_time_10ms = time.time()
@@ -196,6 +196,16 @@ tc_mode = 0 # 0 "NORMAL" 1 "SLIP_START" 2 "DEV_MODE_1" 3 "DEV_MODE_2" 4 "ROLLS_M
 ptc_ok = True
 btc_state = True
 vehicle_hold = False
+driveBlocked = 0 # 1 "DRIVE_BLOCKED_FRUNK" 0 "DRIVE_BLOCKED_NONE" 2 "DRIVE_BLOCKED_PROX"
+brakePedalState = 0 # 2 "INVALID" 0 "OFF" 1 "ON" 
+systemState = 5 # 4 "DI_SYS_ABORT" 5 "DI_SYS_ENABLE" 3 "DI_SYS_FAULT" 1 "DI_SYS_IDLE" 2 "DI_SYS_STANDBY" 0 "DI_SYS_UNAVAILABLE"
+immoState = 0 # 2 "DI_IMM_STATE_AUTHENTICATING" 3 "DI_IMM_STATE_DISARMED" 6 "DI_IMM_STATE_FAULT" 4 "DI_IMM_STATE_IDLE" 0 "DI_IMM_STATE_INIT_SNA" 1 "DI_IMM_STATE_REQUEST" 5 "DI_IMM_STATE_RESET"
+regenLight = 1
+accelPedalPosition = 50
+proximity = 0
+epbRequest = 0 #  0 "DI_EPBREQUEST_NO_REQUEST" 1 "DI_EPBREQUEST_PARK" 2 "DI_EPBREQUEST_UNPARK"
+tractionControlMode = 0 # 6 "Offroad Assist" 5 "Dyno Mode" 4 "Rolls Mode" 3 "Dev2" 2 "Dev1" 1 "Slip Start" 0 "Standard" 
+trackModeState = 0 #  1 "TRACK_MODE_AVAILABLE" 2 "TRACK_MODE_ON" 0 "TRACK_MODE_UNAVAILABLE" 
 
 #Door Status
 hood = False
@@ -282,6 +292,39 @@ def gui_thread():
 
     make_swc_panel(left_panel,  "left")
     make_swc_panel(right_panel, "right")
+
+    # ---------- GEAR SELECTOR (P / R / N / D) ----------
+    gear_label_map = {1: "P", 2: "R", 3: "N", 4: "D"}
+    gear_var = tk.StringVar(value=gear_label_map.get(gear, "D"))
+
+    def set_gear(v: int):
+        global gear
+        gear = v
+        gear_var.set(gear_label_map[v])
+
+    frame_gear = tk.LabelFrame(frame_swc, text="Gear (0x118 third byte)", padx=8, pady=8)
+    frame_gear.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8,0))
+
+    gear_panel = tk.Frame(frame_gear)
+    gear_panel.pack(fill="x")
+
+    # Buttons: Park, Reverse, Neutral, Drive
+    btn_park   = tk.Button(gear_panel, text="Park (P)",    command=lambda: set_gear(1))
+    btn_rev    = tk.Button(gear_panel, text="Reverse (R)", command=lambda: set_gear(2))
+    btn_neutral= tk.Button(gear_panel, text="Neutral (N)", command=lambda: set_gear(3))
+    btn_drive  = tk.Button(gear_panel, text="Drive (D)",   command=lambda: set_gear(4))
+
+    btn_park.grid(   row=0, column=0, sticky="ew", padx=4, pady=2)
+    btn_rev.grid(    row=0, column=1, sticky="ew", padx=4, pady=2)
+    btn_neutral.grid(row=0, column=2, sticky="ew", padx=4, pady=2)
+    btn_drive.grid(  row=0, column=3, sticky="ew", padx=4, pady=2)
+
+    for c in range(4):
+        gear_panel.columnconfigure(c, weight=1)
+
+    # Show current gear
+    tk.Label(frame_gear, text="Current:", anchor="w").pack(fill="x", pady=(6,0))
+    tk.Label(frame_gear, textvariable=gear_var, anchor="w", font=("Segoe UI", 11, "bold")).pack(fill="x")
 
     # ---------- INFO PANES under SWC ----------
     # COL 0
@@ -1009,8 +1052,20 @@ while True:
                 0x80,0x00,0xEB,0x0A], is_extended_id=False), 
             can.Message(arbitration_id=0x2b6, data=[ # DI Chassis Control Status
                 vdc_flash+(vdc_on*2)+(tc_flash*4)+(tc_on*8)+(tc_mode*16)+(ptc_ok*128),(btc_state*2)+(vehicle_hold*4)], is_extended_id=False), #128 sets ptc to on
-            #can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
-            #    0b001111,0x33,0x00,0x00,0xA4,0x1A,0xA1,0x09], is_extended_id=False), 
+            can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
+                0x02,0x00,0x00,0x00,0xFF,0x00,0x02,0x00], is_extended_id=False), 
+            can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
+                0x03,0x6D,0x99,0x02,0x1B,0x7D,0x00,0x00], is_extended_id=False), 
+            can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
+                0xFC,0x1F,0x43,0xDA,0xA0,0x40,0x0A,0x00], is_extended_id=False), 
+            can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
+                0x05,0x00,0x00,0x00,0x00,0x00,0x00,0x00], is_extended_id=False), 
+            can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
+                0x76,0x80,0x08,0x00,0x4B,0x45,0xF9,0x62], is_extended_id=False), 
+            can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
+                0x10,0x21,0x0B+(3*64),0x7E,0xCE,0x52,0x00,0x04], is_extended_id=False), 
+            can.Message(arbitration_id=0x2e1, data=[ # Vehicle Controller Front, this one is a multiplex message and i havent added that yet so its commented out. Controls frunk status
+                0x39,0x8D,0x10,0x89,0x0D,0x00,0x00,0x00], is_extended_id=False), 
             can.Message(arbitration_id=0x132, data = [ #rawbattcurrent: -340 = full regen, 
                 battVoltage_scaled & 0xFF, (battVoltage_scaled >> 8) & 0xFF,  # 0-16: BattVoltage
                 smoothBattCurrent_scaled & 0xFF, (smoothBattCurrent_scaled >> 8) & 0xFF,  # 16-32: SmoothBattCurrent
@@ -1038,11 +1093,8 @@ while True:
             #    random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False),
         ]
         
-        if swc_frame_bytes:
-            messages_50ms_vehicle.append(
-                can.Message(arbitration_id=0x3C2, data=list(swc_frame_bytes), is_extended_id=False)
-            )
-        
+        # (SWC message handled in 50ms block)
+
         #Update checksums and counters here
         counter_8bit_100ms = (counter_8bit_100ms + 1) % 256
         counter_4bit_100ms = (counter_4bit_100ms + 1) % 15
@@ -1147,13 +1199,20 @@ while True:
     if elapsed_time_50ms >= 0.05:  # 50ms
 
         messages_50ms_vehicle = [
-
+            can.Message(arbitration_id=id_counter, data=[
+                random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False),
+        
         ]
-
+        # Send SWC (0x3C2) at ~20 Hz if we have a fresh frame
+        if swc_frame_bytes:
+            messages_50ms_vehicle.append(
+                can.Message(arbitration_id=0x3C2, data=list(swc_frame_bytes), is_extended_id=False)
+            )
 
         messages_50ms_chassis = [
-            #can.Message(arbitration_id=0x1, data=[ # none
-            #    0,0,0,0,0,0,0,0], is_extended_id=False),    
+            can.Message(arbitration_id=id_counter, data=[
+                random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255),random.randint(0,255)], is_extended_id=False),
+         
         ]
         for message in messages_50ms_vehicle:
             vehicle_bus.send(message)
@@ -1167,13 +1226,13 @@ while True:
         start_time_50ms = time.time()
     # Execute code every 10ms
     elapsed_time_10ms = current_time - start_time_10ms
-    if elapsed_time_50ms >= 0.01:  # 10ms
+    if elapsed_time_10ms >= 0.01:  # 10ms
 
         messages_10ms_vehicle = [
             can.Message(arbitration_id=0x118, data=[ # Drive system status (gear)
-                0xFA,0x61,gear*32,0x00,0x00,0x88,0x70,0xFB], is_extended_id=False), #3rd byte is gear
+                0xFA,driveBlocked*16,(gear*32)+(brakePedalState*8)+systemState,(immoState*8)+(regenLight*4),accelPedalPosition,(proximity*64)+(epbRequest*16)+tractionControlMode,0x70+trackModeState,0xFB], is_extended_id=False), #3rd byte is gear
         ]
-
+        
 
         messages_10ms_chassis = [
             #can.Message(arbitration_id=0x1, data=[ # none
@@ -1200,4 +1259,3 @@ while True:
             id_counter = 0
 
         start_time_5s = time.time()
-

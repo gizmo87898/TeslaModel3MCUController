@@ -1,0 +1,21 @@
+m0
+25 - aircompressorstatus
+49 - anyclosureopen
+50 - anydooropen
+20 - crashdetectedtype
+22 - crashstate
+24 - crashunlockoverrideset
+62 - frunkaccesspost
+48 - frunkinteriorrelswitch
+3 - frunklatchstatus
+60 - headlampleftfanstatus
+61 - headlamprightfanstatus
+28 - headlightleftvposition
+38 - headlightrightvposition
+51 - hornon
+63 - isactiveheatingbattery
+57 - passengerbucklestatus
+52 - radarheaterstate
+16 - wiperstate
+8 - wiperspeed
+12 - wiperposition
